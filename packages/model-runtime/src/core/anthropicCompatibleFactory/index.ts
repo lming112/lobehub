@@ -52,7 +52,7 @@ import {
   recordAnthropicNonStreamingResponse,
   recordAnthropicResponseMetadata,
 } from './providerDiagnostics';
-import { resolveCacheTTL } from './resolveCacheTTL';
+import { buildCacheControl, resolveCacheTTL } from './resolveCacheTTL';
 import { resolveMaxTokens } from './resolveMaxTokens';
 import { resolveClaudeThinkingConfig } from './resolveThinkingConfig';
 
@@ -150,11 +150,22 @@ export interface AnthropicCompatibleParamsInput<T extends Record<string, any> = 
   models?: AnthropicCompatibleFactoryOptions<T>['models'];
 }
 
+export interface BuildDefaultAnthropicPayloadOptions {
+  /**
+   * Honour `payload.contextCachingTTL` (`1h` breakpoints). Off by default: the builder is
+   * shared by Anthropic-compatible endpoints (Kimi, MiniMax, Moonshot, Copilot, custom
+   * proxies) that do not document the `ttl` field, so only providers that bill the 1h tier
+   * opt in. Usage pricing follows the `ttl` actually written (see `resolveCacheTTL`).
+   */
+  allowExtendedCacheTTL?: boolean;
+}
+
 /**
  * Build the default Anthropic Messages payload with LobeChat normalization.
  */
 export const buildDefaultAnthropicPayload = async (
   payload: ChatStreamPayload,
+  options: BuildDefaultAnthropicPayloadOptions = {},
 ): Promise<Anthropic.MessageCreateParams> => {
   const {
     messages,
@@ -168,6 +179,7 @@ export const buildDefaultAnthropicPayload = async (
     enabledContextCaching = true,
     enabledSearch,
   } = payload;
+  const contextCachingTTL = options.allowExtendedCacheTTL ? payload.contextCachingTTL : undefined;
 
   const { anthropic: anthropicModels } = await import('model-bank');
 
@@ -189,7 +201,7 @@ export const buildDefaultAnthropicPayload = async (
   const systemPrompts = systemPromptText
     ? ([
         {
-          cache_control: enabledContextCaching ? { type: 'ephemeral' } : undefined,
+          cache_control: enabledContextCaching ? buildCacheControl(contextCachingTTL) : undefined,
           text: systemPromptText,
           type: 'text',
         },
@@ -198,11 +210,16 @@ export const buildDefaultAnthropicPayload = async (
 
   const postMessages = stripUnsupportedClaudeAssistantPrefill(
     model,
-    await buildAnthropicMessages(userMessages, { enabledContextCaching }),
+    await buildAnthropicMessages(userMessages, {
+      cacheTTL: contextCachingTTL,
+      enabledContextCaching,
+    }),
   );
 
-  let postTools = buildAnthropicTools(tools, { enabledContextCaching }) as
-    AnthropicTools[] | undefined;
+  let postTools = buildAnthropicTools(tools, {
+    cacheTTL: contextCachingTTL,
+    enabledContextCaching,
+  }) as AnthropicTools[] | undefined;
 
   if (enabledSearch) {
     const webSearchTool = buildSearchTool();
@@ -464,7 +481,9 @@ export const createAnthropicCompatibleParams = <T extends Record<string, any> = 
     baseURL,
     chatCompletion: {
       getPricingOptions: resolveDefaultAnthropicPricingOptions,
-      handlePayload: buildDefaultAnthropicPayload,
+      // Wrapped: the runtime passes its constructor options as the second argument,
+      // which must not reach the builder's own options.
+      handlePayload: (payload) => buildDefaultAnthropicPayload(payload),
       ...chatCompletion,
     },
     customClient: customClient ?? { createClient: createDefaultAnthropicClient },
