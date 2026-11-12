@@ -1,0 +1,27 @@
+name: superagent-trigger
+
+# Demo helper: posts a comment as github-actions[bot] so dsh-superagent sees a
+# request from an actor that is not the agent account itself.
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Issue number to comment on
+        required: true
+      text:
+        description: Comment body
+        required: true
+
+permissions:
+  issues: write
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post comment as the workflow bot
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue }}
+          TEXT: ${{ inputs.text }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE}/comments" -f body="$TEXT"
