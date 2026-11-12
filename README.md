@@ -4,7 +4,7 @@
 
 # LobeHub
 
-**Super-Agents on Your Team**
+**Super Agents on Your Team**
 
 Add super-agents to the chats your team already uses.<br/>
 They take on work by themselves and get better every week.
